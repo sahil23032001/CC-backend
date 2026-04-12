@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CardIQ - Smart Credit Card Recommendations</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #13131a;
+            --glass-bg: rgba(25, 25, 35, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --accent-purple: #a78bfa;
+            --accent-blue: #60a5fa;
+            --accent-pink: #f472b6;
+            --text-primary: #f5f5f7;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --success: #34d399;
+            --warning: #fbbf24;
+            --error: #f87171;
+            --glow-purple: rgba(167, 139, 250, 0.3);
+            --glow-blue: rgba(96, 165, 250, 0.3);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(ellipse at 20% 10%, rgba(167, 139, 250, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 90%, rgba(96, 165, 250, 0.12) 0%, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding: 2rem 0;
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.02em;
+        }
+
+        .tagline {
+            font-size: 1.125rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 1.5rem;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .glass-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent-purple), transparent);
+            opacity: 0.5;
+        }
+
+        .form-card {
+            margin-bottom: 2rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        input, select {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 0.75rem;
+            padding: 0.875rem 1rem;
+            font-size: 1rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--accent-purple);
+            background: rgba(255, 255, 255, 0.06);
+            box-shadow: 0 0 0 3px var(--glow-purple);
+        }
+
+        select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            padding-right: 2.5rem;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            color: white;
+            border: none;
+            border-radius: 0.75rem;
+            padding: 1rem 2.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .btn:hover::before {
+            opacity: 1;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px var(--glow-purple);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn span {
+            position: relative;
+            z-index: 1;
+        }
+
+        .btn-container {
+            display: flex;
+            justify-content: center;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem 2rem;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: var(--accent-purple);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        .error-state {
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin-top: 1rem;
+            color: var(--error);
+        }
+
+        .result-section {
+            margin-top: 2rem;
+        }
+
+        .best-card {
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.15), rgba(96, 165, 250, 0.15));
+            border: 1px solid rgba(167, 139, 250, 0.3);
+            border-radius: 1.5rem;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .best-card::after {
+            content: 'BEST MATCH';
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 2rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+        }
+
+        .card-header {
+            margin-bottom: 1.5rem;
+        }
+
+        .card-name {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+            background: linear-gradient(135deg, var(--text-primary), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .card-issuer {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .confidence-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.06);
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-size: 0.875rem;
+            margin-top: 1rem;
+        }
+
+        .confidence-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        .confidence-dot.medium {
+            background: var(--warning);
+        }
+
+        .confidence-dot.low {
+            background: var(--error);
+        }
+
+        .info-section {
+            margin-top: 1.5rem;
+        }
+
+        .info-section h4 {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+        }
+
+        .info-section ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .info-section li {
+            padding-left: 1.5rem;
+            position: relative;
+            color: var(--text-primary);
+        }
+
+        .info-section li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--accent-purple);
+        }
+
+        .decision-summary {
+            background: rgba(255, 255, 255, 0.04);
+            border-left: 3px solid var(--accent-purple);
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            margin-top: 1.5rem;
+            font-size: 0.9375rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        .ranked-cards {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .ranked-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .ranked-card:hover {
+            border-color: rgba(167, 139, 250, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .ranked-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 1rem;
+        }
+
+        .ranked-card-title h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .ranked-card-title p {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .card-score {
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+
+        .card-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .metric {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .metric-value {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .reward-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .reward-tag {
+            background: rgba(167, 139, 250, 0.15);
+            color: var(--accent-purple);
+            padding: 0.375rem 0.875rem;
+            border-radius: 2rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+        }
+
+        .evidence-points {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+
+        .evidence-points h5 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .evidence-points ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+
+        .evidence-points li {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            padding-left: 1.25rem;
+            position: relative;
+        }
+
+        .evidence-points li::before {
+            content: '•';
+            position: absolute;
+            left: 0;
+            color: var(--accent-blue);
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .logo {
+                font-size: 2rem;
+            }
+
+            .tagline {
+                font-size: 1rem;
+            }
+
+            .glass-card {
+                padding: 1.5rem;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+
+            .card-name {
+                font-size: 1.5rem;
+            }
+
+            .card-metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 class="logo">CardIQ</h1>
+            <p class="tagline">AI-powered credit card recommendations tailored to your spending</p>
+        </header>
+
+        <div class="glass-card form-card">
+            <form id="recommendForm">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="monthlyExpense">Monthly Expense (₹)</label>
+                        <input type="number" id="monthlyExpense" name="monthlyExpense" min="0" step="1000" required placeholder="40000">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="expenseType">Expense Type</label>
+                        <select id="expenseType" name="expenseType" required>
+                            <option value="">Select category</option>
+                            <option value="shopping">Shopping</option>
+                            <option value="dining">Dining</option>
+                            <option value="travel">Travel</option>
+                            <option value="hotel">Hotel</option>
+                            <option value="movies">Movies</option>
+                            <option value="fuel">Fuel</option>
+                            <option value="grocery">Grocery</option>
+                            <option value="online">Online</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="desiredOutput">Desired Output</label>
+                        <select id="desiredOutput" name="desiredOutput" required>
+                            <option value="">Select benefit</option>
+                            <option value="cashback">Cashback</option>
+                            <option value="shopping">Shopping Rewards</option>
+                            <option value="dining">Dining Rewards</option>
+                            <option value="travel">Travel Points</option>
+                            <option value="hotel">Hotel Benefits</option>
+                            <option value="movie">Movie Tickets</option>
+                            <option value="fuel">Fuel Savings</option>
+                            <option value="lounge">Lounge Access</option>
+                            <option value="rewards">General Rewards</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="maxAnnualFee">Max Annual Fee (₹)</label>
+                        <input type="number" id="maxAnnualFee" name="maxAnnualFee" min="0" step="100" required placeholder="1000">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="creditScore">Credit Score</label>
+                        <input type="number" id="creditScore" name="creditScore" min="300" max="900" step="10" required placeholder="760">
+                    </div>
+                </div>
+
+                <div class="btn-container">
+                    <button type="submit" class="btn" id="submitBtn">
+                        <span>Get Recommendation</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div id="loadingState" class="glass-card loading hidden">
+            <div class="spinner"></div>
+            <p>Analyzing your spending profile...</p>
+        </div>
+
+        <div id="errorState" class="hidden">
+            <div class="error-state">
+                <strong>Error:</strong> <span id="errorMessage"></span>
+            </div>
+        </div>
+
+        <div id="emptyState" class="glass-card empty-state">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+            </svg>
+            <h3>Find Your Perfect Card</h3>
+            <p>Enter your details above to get personalized recommendations</p>
+        </div>
+
+        <div id="resultsSection" class="result-section hidden">
+            <div id="bestCardSection"></div>
+            
+            <div id="rankedCardsSection">
+                <h2 class="section-title">All Recommendations</h2>
+                <div id="rankedCardsList" class="ranked-cards"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('recommendForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const loadingState = document.getElementById('loadingState');
+        const errorState = document.getElementById('errorState');
+        const errorMessage = document.getElementById('errorMessage');
+        const emptyState = document.getElementById('emptyState');
+        const resultsSection = document.getElementById('resultsSection');
+        const bestCardSection = document.getElementById('bestCardSection');
+        const rankedCardsList = document.getElementById('rankedCardsList');
+
+        function showLoading() {
+            loadingState.classList.remove('hidden');
+            errorState.classList.add('hidden');
+            emptyState.classList.add('hidden');
+            resultsSection.classList.add('hidden');
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorState.classList.remove('hidden');
+            loadingState.classList.add('hidden');
+            submitBtn.disabled = false;
+        }
+
+        function showResults() {
+            resultsSection.classList.remove('hidden');
+            loadingState.classList.add('hidden');
+            emptyState.classList.add('hidden');
+            errorState.classList.add('hidden');
+            submitBtn.disabled = false;
+        }
+
+        function formatCurrency(value) {
+            return '₹' + value.toLocaleString('en-IN');
+        }
+
+        function renderBestCard(decision) {
+            const card = decision.recommended_card;
+            const confidenceClass = card.confidence === 'high' ? '' : card.confidence === 'medium' ? 'medium' : 'low';
+            
+            const whyList = card.why_it_wins.map(reason => `<li>${reason}</li>`).join('');
+            const tradeoffsList = card.tradeoffs.map(tradeoff => `<li>${tradeoff}</li>`).join('');
+            
+            bestCardSection.innerHTML = `
+                <div class="best-card">
+                    <div class="card-header">
+                        <h2 class="card-name">${card.card_name}</h2>
+                        <p class="card-issuer">${card.issuer}</p>
+                        <div class="confidence-badge">
+                            <span class="confidence-dot ${confidenceClass}"></span>
+                            <span>${card.confidence} confidence</span>
+                        </div>
+                    </div>
+                    
+                    <div class="info-section">
+                        <h4>Why This Card Wins</h4>
+                        <ul>${whyList}</ul>
+                    </div>
+                    
+                    ${card.tradeoffs.length > 0 ? `
+                        <div class="info-section">
+                            <h4>Things to Consider</h4>
+                            <ul>${tradeoffsList}</ul>
+                        </div>
+                    ` : ''}
+                    
+                    <div class="decision-summary">
+                        ${decision.decision_summary}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderRankedCards(cards) {
+            rankedCardsList.innerHTML = cards.map(card => {
+                const rewardTags = card.reward_type.map(type => 
+                    `<span class="reward-tag">${type}</span>`
+                ).join('');
+                
+                const evidenceList = card.evidence_points.slice(0, 3).map(point => 
+                    `<li>${point}</li>`
+                ).join('');
+                
+                return `
+                    <div class="ranked-card">
+                        <div class="ranked-card-header">
+                            <div class="ranked-card-title">
+                                <h3>${card.card_name}</h3>
+                                <p>${card.issuer}</p>
+                            </div>
+                            <div class="card-score">${card.total_score.toFixed(1)}</div>
+                        </div>
+                        
+                        <div class="card-metrics">
+                            <div class="metric">
+                                <span class="metric-label">Annual Fee</span>
+                                <span class="metric-value">${formatCurrency(card.annual_fee)}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Est. Annual Value</span>
+                                <span class="metric-value">${formatCurrency(card.estimated_annual_value)}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="reward-tags">
+                            ${rewardTags}
+                        </div>
+                        
+                        <div class="evidence-points">
+                            <h5>Key Highlights</h5>
+                            <ul>${evidenceList}</ul>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            submitBtn.disabled = true;
+            showLoading();
+            
+            const formData = {
+                monthly_expense: parseInt(document.getElementById('monthlyExpense').value),
+                expense_type: document.getElementById('expenseType').value,
+                desired_output: document.getElementById('desiredOutput').value,
+                max_annual_fee: parseInt(document.getElementById('maxAnnualFee').value),
+                credit_score: parseInt(document.getElementById('creditScore').value),
+                use_cache: true,
+                debug: false
+            };
+            
+            try {
+                const response = await fetch('/api/recommend', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.result && data.result.final_decision) {
+                    renderBestCard(data.result.final_decision);
+                    renderRankedCards(data.result.ranked_cards);
+                    showResults();
+                } else {
+                    throw new Error('Invalid response format');
+                }
+                
+            } catch (error) {
+                showError(error.message || 'Failed to get recommendations. Please try again.');
+            }
+        });
+    </script>
+</body>
+</html>
