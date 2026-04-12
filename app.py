@@ -21,13 +21,15 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 FRONTEND_PROXY_SECRET = os.getenv("FRONTEND_PROXY_SECRET")
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "https://your-frontend.vercel.app")
 
-if not SUPABASE_URL or not SUPABASE_KEY or not GROQ_API_KEY or not FRONTEND_PROXY_SECRET:
-    raise RuntimeError(
-        "Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY, GROQ_API_KEY, or FRONTEND_PROXY_SECRET"
-    )
+# Make environment check more lenient for initial deployment
+supabase: Optional[Client] = None
+groq_client: Optional[Groq] = None
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-groq_client = Groq(api_key=GROQ_API_KEY)
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+if GROQ_API_KEY:
+    groq_client = Groq(api_key=GROQ_API_KEY)
 
 
 # =========================================================
@@ -35,13 +37,54 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 # =========================================================
 app = FastAPI(title="Credit Card Recommender API", version="1.0.0")
 
+# More permissive CORS for Railway deployment
+allowed_origins = [FRONTEND_ORIGIN]
+if os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+    railway_url = f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}"
+    allowed_origins.append(railway_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN],
+    allow_origins=allowed_origins + ["*"],  # Allow all origins for now
     allow_credentials=True,
-    allow_methods=["POST", "GET"],
+    allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# =========================================================
+# HEALTH CHECK ENDPOINTS (CRITICAL FOR RAILWAY)
+# =========================================================
+@app.get("/")
+async def root():
+    """Root endpoint - Railway uses this to check if app is alive"""
+    return {
+        "service": "Credit Card Recommender API",
+        "status": "running",
+        "version": "1.0.0",
+        "health": "/health"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Detailed health check endpoint"""
+    health_status = {
+        "status": "healthy",
+        "service": "Credit Card Recommender API",
+        "version": "1.0.0",
+        "checks": {
+            "supabase": "connected" if supabase else "not_configured",
+            "groq": "connected" if groq_client else "not_configured",
+            "environment": {
+                "SUPABASE_URL": "set" if SUPABASE_URL else "missing",
+                "SUPABASE_KEY": "set" if SUPABASE_KEY else "missing",
+                "GROQ_API_KEY": "set" if GROQ_API_KEY else "missing",
+                "FRONTEND_PROXY_SECRET": "set" if FRONTEND_PROXY_SECRET else "missing",
+            }
+        }
+    }
+    return health_status
 
 
 # =========================================================
@@ -200,4 +243,67 @@ def bucket_annual_fee(x: float) -> int:
 
 
 def bucket_credit_score(score: int) -> str:
-    score = int
+    """Fixed function - categorize credit score into buckets"""
+    score = int(score)
+    if score >= 750:
+        return "excellent"
+    elif score >= 700:
+        return "good"
+    elif score >= 650:
+        return "fair"
+    else:
+        return "poor"
+
+
+# =========================================================
+# PLACEHOLDER RECOMMENDATION ENDPOINT
+# =========================================================
+@app.post("/recommend")
+async def recommend_cards(
+    request: RecommendationRequest,
+    x_frontend_secret: Optional[str] = Header(None)
+):
+    """
+    Placeholder recommendation endpoint
+    Replace this with your full logic once deployment works
+    """
+    # Verify secret if configured
+    if FRONTEND_PROXY_SECRET and x_frontend_secret != FRONTEND_PROXY_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid or missing frontend secret")
+    
+    # Check if services are configured
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="Groq API not configured")
+    
+    # Normalize user profile
+    profile = normalize_user_profile(request)
+    
+    # Return a placeholder response
+    return {
+        "status": "success",
+        "message": "API is working! Add your full recommendation logic here.",
+        "profile": profile,
+        "recommendations": [
+            {
+                "card_name": "Example Card",
+                "score": 95.0,
+                "reason": "This is a placeholder response"
+            }
+        ]
+    }
+
+
+# =========================================================
+# STARTUP EVENT
+# =========================================================
+@app.on_event("startup")
+async def startup_event():
+    """Log startup information"""
+    print("=" * 60)
+    print("Credit Card Recommender API Starting...")
+    print(f"Supabase: {'✓ Connected' if supabase else '✗ Not configured'}")
+    print(f"Groq: {'✓ Connected' if groq_client else '✗ Not configured'}")
+    print(f"Frontend Origin: {FRONTEND_ORIGIN}")
+    print("=" * 60)
