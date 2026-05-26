@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import hashlib
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,6 +45,10 @@ app.add_middleware(
 )
 
 
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
 @app.get("/")
 async def root():
     return {
@@ -83,6 +88,10 @@ class RecommendationRequest(BaseModel):
     use_cache: bool = True
     debug: bool = False
 
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
 SUPPORTED_EXPENSE_TYPES = {
     "shopping", "dining", "travel", "hotel", "movies",
@@ -142,6 +151,10 @@ SECTION_BOOSTS = {
     "movies": 8.0,
 }
 
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 def ensure_services() -> None:
     if not supabase:
@@ -216,8 +229,13 @@ def normalize_user_profile(payload: RecommendationRequest) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Cache helpers
+# ---------------------------------------------------------------------------
+
 def bucket_monthly_expense(x: float) -> int:
-    return int(round(float(x) / 10000.0) * 10000)
+    # Finer bucket: ₹5,000 steps instead of ₹10,000 to avoid over-caching
+    return int(round(float(x) / 5000.0) * 5000)
 
 
 def bucket_annual_fee(x: float) -> int:
@@ -305,6 +323,10 @@ def save_cache(profile: Dict[str, Any], response_json: Dict[str, Any], model_nam
     )
 
 
+# ---------------------------------------------------------------------------
+# Data fetching
+# ---------------------------------------------------------------------------
+
 def fetch_eligible_cards(profile: Dict[str, Any]) -> List[Dict[str, Any]]:
     response = (
         supabase.table("credit_cards")
@@ -360,34 +382,27 @@ def fetch_chunks_for_cards(card_ids: List[str]) -> Dict[str, List[Dict[str, Any]
     return grouped
 
 
+# ---------------------------------------------------------------------------
+# Scoring
+# ---------------------------------------------------------------------------
+
 def get_query_terms(profile: Dict[str, Any]) -> List[str]:
-    base_terms = [
+    # Keep primary terms; avoid generic noise terms that inflate scores on volume
+    primary_terms = [
         profile["expense_type"],
         profile["desired_output"],
-        "annual fee",
         "annual fee waiver",
         "fee waiver",
-        "reward",
-        "benefit",
-        "cashback",
-        "points",
-        "lounge",
-        "travel",
-        "hotel",
-        "dining",
-        "movie",
-        "fuel",
-        "forex",
     ]
 
     for x in USER_INTENT_SYNONYMS.get(profile["expense_type"], []):
-        base_terms.append(x)
+        primary_terms.append(x)
     for x in USER_INTENT_SYNONYMS.get(profile["desired_output"], []):
-        base_terms.append(x)
+        primary_terms.append(x)
 
     seen = set()
     final_terms: List[str] = []
-    for t in base_terms:
+    for t in primary_terms:
         t = normalize_text(t)
         if t and t not in seen:
             seen.add(t)
@@ -405,9 +420,9 @@ def score_chunk_relevance(chunk: Dict[str, Any], profile: Dict[str, Any]) -> flo
 
     score = SECTION_BOOSTS.get(section, 0.0)
 
-    for term in get_query_terms(profile):
-        if term and term in text:
-            score += 2.5
+    # Cap term match bonus so volume doesn't dominate
+    term_hits = sum(1 for term in get_query_terms(profile) if term and term in text)
+    score += min(term_hits * 2.5, 10.0)
 
     if section == profile["desired_output"]:
         score += 8.0
@@ -575,15 +590,15 @@ def retrieval_fit(top_chunks: List[Dict[str, Any]], profile: Dict[str, Any]) -> 
     desired = profile["desired_output"]
     expense = profile["expense_type"]
 
-    score = 0.0
     evidence_points: List[str] = []
+    raw_scores: List[float] = []
 
     for ch in top_chunks:
         rel = to_float(ch.get("relevance_score"), 0.0)
         text = normalize_text(ch.get("chunk_text"))
         section = normalize_text(ch.get("section"))
 
-        score += min(rel, 8.0)
+        raw_scores.append(min(rel, 8.0))
 
         if desired in text or section == desired:
             evidence_points.append(f"Mentions {desired} benefit")
@@ -596,6 +611,11 @@ def retrieval_fit(top_chunks: List[Dict[str, Any]], profile: Dict[str, Any]) -> 
         if "milestone" in text:
             evidence_points.append("Contains milestone/spend condition")
 
+    # Use AVERAGE relevance score (not sum) so cards with more chunks don't
+    # get an unfair volume advantage
+    avg_score = (sum(raw_scores) / len(raw_scores)) if raw_scores else 0.0
+    final_score = round(min(avg_score * 3.75, 30.0), 2)
+
     clean: List[str] = []
     seen = set()
     for e in evidence_points:
@@ -603,7 +623,7 @@ def retrieval_fit(top_chunks: List[Dict[str, Any]], profile: Dict[str, Any]) -> 
             seen.add(e)
             clean.append(e)
 
-    return round(min(score, 30.0), 2), clean[:5]
+    return final_score, clean[:5]
 
 
 def estimate_annual_value(card: Dict[str, Any], profile: Dict[str, Any], top_chunks: List[Dict[str, Any]]) -> float:
@@ -611,27 +631,22 @@ def estimate_annual_value(card: Dict[str, Any], profile: Dict[str, Any], top_chu
     desired = profile["desired_output"]
     annual_fee = to_float(card.get("annual_fee"), 0.0)
 
-    reward_rate = 0.005
-    text_blob = " ".join(
-        [normalize_text(card.get("key_benefits", ""))] +
-        [normalize_text(ch.get("chunk_text")) for ch in top_chunks]
-    )
+    # Try to extract a real reward rate from card structured data first
+    reward_rate = _extract_reward_rate_from_card(card, desired)
 
-    if desired == "cashback":
-        reward_rate = 0.01
-    elif desired in {"shopping", "dining", "movies"}:
-        reward_rate = 0.008
-    elif desired in {"travel", "hotel"}:
-        reward_rate = 0.012
-    elif desired == "fuel":
-        reward_rate = 0.007
-
-    if "accelerated" in text_blob:
-        reward_rate += 0.003
-    if "cashback" in text_blob:
-        reward_rate += 0.002
-    if "reward points" in text_blob:
-        reward_rate += 0.002
+    # Fall back to text-based heuristic if no structured rate found
+    if reward_rate is None:
+        reward_rate = _heuristic_reward_rate(desired)
+        text_blob = " ".join(
+            [normalize_text(card.get("key_benefits", ""))] +
+            [normalize_text(ch.get("chunk_text")) for ch in top_chunks]
+        )
+        if "accelerated" in text_blob:
+            reward_rate += 0.003
+        if "cashback" in text_blob:
+            reward_rate += 0.002
+        if "reward points" in text_blob:
+            reward_rate += 0.002
 
     estimated_rewards = annual_spend * reward_rate
 
@@ -644,6 +659,43 @@ def estimate_annual_value(card: Dict[str, Any], profile: Dict[str, Any], top_chu
         lounge_value = min(lounge_value, 8000)
 
     return round(estimated_rewards + lounge_value - annual_fee, 2)
+
+
+def _extract_reward_rate_from_card(card: Dict[str, Any], desired: str) -> Optional[float]:
+    """
+    Attempt to read an actual reward rate from card structured fields.
+    Returns None if not found so the caller can fall back to heuristics.
+    """
+    # Many card schemas store cashback_rate or reward_rate as a percentage
+    for field in ("cashback_rate", "reward_rate", "base_reward_rate"):
+        val = card.get(field)
+        if val is not None:
+            try:
+                rate = float(val)
+                # Stored as percentage (e.g. 1.5 means 1.5%)
+                if rate > 1:
+                    rate = rate / 100.0
+                return rate
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def _heuristic_reward_rate(desired: str) -> float:
+    rates = {
+        "cashback": 0.010,
+        "shopping": 0.008,
+        "dining": 0.008,
+        "movies": 0.008,
+        "travel": 0.012,
+        "hotel": 0.012,
+        "fuel": 0.007,
+        "lounge": 0.005,
+        "forex": 0.010,
+        "rewards": 0.007,
+        "general": 0.005,
+    }
+    return rates.get(desired, 0.005)
 
 
 def score_card_v2(
@@ -709,7 +761,16 @@ def score_card_v2(
     }
 
 
+# ---------------------------------------------------------------------------
+# LLM layer — now hides scores and shuffles card order
+# ---------------------------------------------------------------------------
+
 def build_llm_card_summary(scored_card: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build the card summary sent to the LLM.
+    Intentionally EXCLUDES total_score and score_breakdown so the LLM
+    reasons from benefits and evidence, not from backend numbers.
+    """
     return {
         "card_id": scored_card["card_id"],
         "card_name": scored_card["card_name"],
@@ -725,10 +786,9 @@ def build_llm_card_summary(scored_card: Dict[str, Any]) -> Dict[str, Any]:
         "reward_type": scored_card["reward_type"],
         "key_benefits": scored_card["key_benefits"],
         "estimated_annual_value": scored_card["estimated_annual_value"],
-        "total_score": scored_card["total_score"],
-        "score_breakdown": scored_card["score_breakdown"],
         "evidence_points": scored_card["evidence_points"],
         "missing_data_notes": scored_card["missing_data_notes"],
+        # Structured benefit facts (no scores)
         "benefit_facts": [
             {
                 "benefit_type": b.get("benefit_type"),
@@ -738,12 +798,12 @@ def build_llm_card_summary(scored_card: Dict[str, Any]) -> Dict[str, Any]:
             }
             for b in scored_card.get("benefit_facts_used", [])[:6]
         ],
+        # Retrieved document evidence (no scores)
         "retrieved_evidence": [
             {
                 "section": c.get("section"),
                 "heading": c.get("heading"),
                 "chunk_text": c.get("chunk_text"),
-                "relevance_score": c.get("relevance_score"),
             }
             for c in scored_card.get("top_chunks_used", [])[:4]
         ],
@@ -753,24 +813,27 @@ def build_llm_card_summary(scored_card: Dict[str, Any]) -> Dict[str, Any]:
 def groq_compare_cards_v2(profile: Dict[str, Any], scored_cards: List[Dict[str, Any]]) -> Dict[str, Any]:
     llm_cards = [build_llm_card_summary(c) for c in scored_cards]
 
+    # Shuffle so the LLM cannot infer rank from position
+    random.shuffle(llm_cards)
+
     system_prompt = """
-You are a credit card recommendation assistant.
+You are an independent credit card advisor for Indian consumers.
 
-You will receive:
-1. A user profile
-2. Structured card facts
-3. Retrieved evidence from card offering text
-4. Deterministic backend scores
+You will receive a user profile and a shortlist of candidate cards with their benefits and retrieved evidence text.
 
-Rules:
-- Use only the provided data.
-- Do not invent benefits.
-- Prefer cards supported by both structured data and retrieved evidence.
-- If data is missing, say that clearly.
-- Respect the user's fee budget, credit score, expense style, and desired reward output.
-- The backend score is important, but you should still mention tradeoffs.
+Your task is to recommend the single best card for this specific user.
 
-Return strict JSON only in this schema:
+Reasoning rules (follow in order):
+1. Does this card actually reward the user's EXPENSE TYPE? Check reward_type, benefit_facts, retrieved_evidence.
+2. Does this card actually deliver the user's DESIRED OUTPUT? Check reward_type, benefit_facts, retrieved_evidence.
+3. Does the annual fee fit within the user's budget? Prefer fee waiver options where available.
+4. Is the user eligible? Check eligibility hints in retrieved evidence.
+5. Penalise any card that has missing_data_notes — do not assume missing benefits exist.
+6. A cheaper card that genuinely fits beats an expensive card with unverified benefits.
+7. Do NOT default to well-known or premium brands unless the evidence specifically supports them for THIS user's use case.
+8. Do NOT invent or assume benefits not mentioned in benefit_facts or retrieved_evidence.
+
+Return ONLY valid JSON in exactly this schema (no extra keys, no markdown fences):
 {
   "recommended_card": {
     "card_id": "string",
@@ -789,7 +852,7 @@ Return strict JSON only in this schema:
     }
   ],
   "decision_summary": "string",
-  "missing_data_notes": ["string", "string"],
+  "missing_data_notes": ["string"],
   "fit_analysis": {
     "expense_type_fit": "string",
     "desired_output_fit": "string",
@@ -800,15 +863,23 @@ Return strict JSON only in this schema:
 """.strip()
 
     user_prompt = {
-        "user_profile": profile,
-        "ranked_cards": llm_cards,
-        "instructions": [
-            "Choose one best card.",
-            "Use retrieved text evidence as support.",
-            "Prefer stronger evidence-backed matches.",
-            "Mention uncertainty where data is incomplete.",
-            "Do not overclaim unsupported benefits."
-        ]
+        "user_profile": {
+            "monthly_expense_inr": profile["monthly_expense"],
+            "annual_expense_inr": profile["annual_expense"],
+            "expense_type": profile["expense_type"],
+            "desired_output": profile["desired_output"],
+            "max_annual_fee_inr": profile["max_annual_fee"],
+            "credit_score": profile["credit_score"],
+        },
+        "candidate_cards": llm_cards,
+        "reasoning_steps": [
+            "Step 1: For each card check if reward_type or benefit_facts match the user's expense_type.",
+            "Step 2: For each card check if reward_type or retrieved_evidence confirms the user's desired_output.",
+            "Step 3: Verify annual_fee is within max_annual_fee; prefer fee waiver cards.",
+            "Step 4: Penalise cards with non-empty missing_data_notes.",
+            "Step 5: Pick the card with the strongest evidence-backed fit, not the most famous brand.",
+            "Step 6: If two cards are equally good, prefer the one with lower annual fee.",
+        ],
     }
 
     completion = groq_client.chat.completions.create(
@@ -831,6 +902,10 @@ Return strict JSON only in this schema:
         "parsed_response": parsed,
     }
 
+
+# ---------------------------------------------------------------------------
+# Main recommendation pipeline
+# ---------------------------------------------------------------------------
 
 def recommend_credit_card_v2(payload: RecommendationRequest) -> Dict[str, Any]:
     profile = normalize_user_profile(payload)
@@ -865,9 +940,9 @@ def recommend_credit_card_v2(payload: RecommendationRequest) -> Dict[str, Any]:
                     "expense_type_fit": "No eligible cards available",
                     "desired_output_fit": "No eligible cards available",
                     "fee_fit": "Budget may be too restrictive",
-                    "eligibility_fit": "Credit score may be below available card thresholds"
-                }
-            }
+                    "eligibility_fit": "Credit score may be below available card thresholds",
+                },
+            },
         }
         save_cache(profile, response_json, GROQ_MODEL)
         return {
@@ -890,12 +965,26 @@ def recommend_credit_card_v2(payload: RecommendationRequest) -> Dict[str, Any]:
                 card=card,
                 benefit_facts=benefit_map.get(cid, []),
                 top_chunks=top_chunk_map.get(cid, []),
-                profile=profile
+                profile=profile,
             )
         )
 
     scored_cards.sort(key=lambda x: x["total_score"], reverse=True)
     shortlisted = scored_cards[:5]
+
+    # Debug logging — remove or gate behind payload.debug in production
+    print(f"[DEBUG] Eligible cards: {len(eligible_cards)}, Shortlisted: {len(shortlisted)}")
+    for c in shortlisted:
+        print(
+            f"  {c['card_name']:40s} total={c['total_score']:6.1f} "
+            f"structured={c['score_breakdown']['structured_score']:5.1f} "
+            f"benefit={c['score_breakdown']['benefit_score']:5.1f} "
+            f"retrieval={c['score_breakdown']['retrieval_score']:5.1f} "
+            f"value={c['score_breakdown']['value_score']:5.1f} "
+            f"chunks={len(top_chunk_map.get(c['card_id'], []))} "
+            f"facts={len(benefit_map.get(c['card_id'], []))}"
+        )
+
     groq_result = groq_compare_cards_v2(profile, shortlisted)
 
     final_response = {
@@ -923,6 +1012,10 @@ def recommend_credit_card_v2(payload: RecommendationRequest) -> Dict[str, Any]:
         "result": final_response,
     }
 
+
+# ---------------------------------------------------------------------------
+# API endpoint
+# ---------------------------------------------------------------------------
 
 @app.post("/recommend")
 async def recommend_cards(
