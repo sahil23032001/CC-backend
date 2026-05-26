@@ -1028,7 +1028,26 @@ async def recommend_cards(
     ensure_services()
 
     try:
-        return recommend_credit_card_v2(request)
+        result = recommend_credit_card_v2(request)
+        
+        # TEMPORARY DEBUG - remove after diagnosis
+        if result.get("source") == "live":
+            ranked = result["result"].get("ranked_cards", [])
+            print("\n==== SCORE BREAKDOWN ====")
+            for c in ranked:
+                print(
+                    f"{c['card_name']:45s} "
+                    f"TOTAL={c['total_score']:6.1f} | "
+                    f"structured={c['score_breakdown']['structured_score']:5.1f} "
+                    f"benefit={c['score_breakdown']['benefit_score']:5.1f} "
+                    f"retrieval={c['score_breakdown']['retrieval_score']:5.1f} "
+                    f"value={c['score_breakdown']['value_score']:5.1f} | "
+                    f"chunks={len(c.get('top_chunks_used', []))} "
+                    f"facts={len(c.get('benefit_facts_used', []))}"
+                )
+            print("=========================\n")
+        
+        return result
     except HTTPException:
         raise
     except Exception as e:
